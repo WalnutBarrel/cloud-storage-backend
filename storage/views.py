@@ -7,7 +7,7 @@ import zipfile
 import io
 import requests
 from django.http import HttpResponse
-from storage.utils import pick_storage_account
+from .models import pick_storage_account
 import cloudinary
 
 
