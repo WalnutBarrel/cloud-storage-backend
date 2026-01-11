@@ -3,6 +3,11 @@ from rest_framework.response import Response
 from rest_framework import status
 import cloudinary.uploader
 from .models import File, Folder
+import zipfile
+import io
+import requests
+from django.http import HttpResponse
+
 
 
 # =====================
@@ -115,3 +120,30 @@ def list_folders(request):
         }
         for f in folders
     ])
+
+
+@api_view(["POST"])
+def download_zip(request):
+    file_ids = request.data.get("files", [])
+
+    if not file_ids:
+        return Response({"error": "No files selected"}, status=400)
+
+    files = File.objects.filter(id__in=file_ids)
+
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for f in files:
+            r = requests.get(f.file_url)
+            if r.status_code == 200:
+                zip_file.writestr(f.name, r.content)
+
+    zip_buffer.seek(0)
+
+    response = HttpResponse(
+        zip_buffer,
+        content_type="application/zip"
+    )
+    response["Content-Disposition"] = 'attachment; filename="files.zip"'
+    return response
