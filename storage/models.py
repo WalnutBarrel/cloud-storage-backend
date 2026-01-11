@@ -19,6 +19,7 @@ class File(models.Model):
         on_delete=models.CASCADE,
         related_name="files"
     )
+    size = models.BigIntegerField(default=0)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

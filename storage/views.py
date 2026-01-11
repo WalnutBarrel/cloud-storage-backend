@@ -29,6 +29,7 @@ def upload_file(request):
         file_url=result["secure_url"],
         resource_type=result["resource_type"],
         folder=folder,
+        size=result.get("bytes", 0),
     )
 
     return Response({
@@ -58,6 +59,7 @@ def list_files(request):
             "type": f.resource_type,
             "folder": f.folder.id if f.folder else None,
             "uploaded_at": f.uploaded_at,
+            "size": f.size,
         }
         for f in files.order_by("-uploaded_at")
     ])
