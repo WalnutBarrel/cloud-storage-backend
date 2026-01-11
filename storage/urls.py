@@ -14,6 +14,6 @@ urlpatterns = [
     path("storage/stats/", storage_stats),
     path("health/", health_check),
     path("files/clear/", clear_all_files),
-    path("files/download-all-images/", download_all_images),
+    path("files/download-all-images/", download_all_media),
 
 ]
