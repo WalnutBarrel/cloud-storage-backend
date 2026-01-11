@@ -46,7 +46,7 @@ ALLOWED_HOSTS = ["*"]
 INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
-    "storage",
+    "storage.apps.StorageConfig",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
