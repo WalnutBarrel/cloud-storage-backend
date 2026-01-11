@@ -231,3 +231,25 @@ def health_check(request):
 def clear_all_files(request):
     File.objects.all().delete()
     return Response({"success": True})
+
+
+@api_view(["GET"])
+def download_all_images(request):
+    files = File.objects.filter(resource_type="image")
+
+    if not files.exists():
+        return Response({"error": "No images found"}, status=404)
+
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for f in files:
+            r = requests.get(f.file_url, timeout=15)
+            if r.status_code == 200:
+                zip_file.writestr(f.name, r.content)
+
+    zip_buffer.seek(0)
+
+    response = HttpResponse(zip_buffer, content_type="application/zip")
+    response["Content-Disposition"] = 'attachment; filename="all_images.zip"'
+    return response
