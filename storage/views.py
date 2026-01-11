@@ -240,7 +240,7 @@ def clear_all_files(request):
 
 from django.http import StreamingHttpResponse
 from rest_framework.decorators import api_view
-from zipstream import ZipStream
+from zipstream_ng import ZipStream
 import requests
 
 @api_view(["GET"])
