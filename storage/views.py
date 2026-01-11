@@ -293,3 +293,24 @@ def list_image_urls(request):
         }
         for f in files
     ])
+
+
+from django.http import StreamingHttpResponse
+import requests
+import os
+
+@api_view(["GET"])
+def download_file(request, file_id):
+    file = File.objects.get(id=file_id)
+
+    r = requests.get(file.file_url, stream=True, timeout=15)
+
+    response = StreamingHttpResponse(
+        r.iter_content(chunk_size=8192),
+        content_type="application/octet-stream"
+    )
+
+    filename = file.name or os.path.basename(file.file_url)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    return response
