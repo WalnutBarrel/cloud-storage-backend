@@ -2,7 +2,6 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 import cloudinary.uploader
-
 from .models import File, Folder
 
 
@@ -62,6 +61,26 @@ def list_files(request):
         }
         for f in files.order_by("-uploaded_at")
     ])
+
+
+@api_view(["DELETE"])
+def delete_file(request, file_id):
+    file = File.objects.get(id=file_id)
+
+    public_id = file.file_url.split("/")[-1].split(".")[0]
+    cloudinary.uploader.destroy(public_id, resource_type=file.resource_type)
+
+    file.delete()
+    return Response({"success": True})
+
+
+@api_view(["PUT"])
+def rename_file(request, file_id):
+    file = File.objects.get(id=file_id)
+    file.name = request.data.get("name")
+    file.save()
+    return Response({"success": True})
+
 
 
 # =====================
