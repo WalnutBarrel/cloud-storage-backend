@@ -9,6 +9,13 @@ import requests
 from django.http import HttpResponse
 from .models import pick_storage_account
 import cloudinary
+import zipfile
+import tempfile
+import os
+import requests
+from django.http import FileResponse
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
 
 
@@ -238,11 +245,6 @@ def clear_all_files(request):
     return Response({"success": True})
 
 
-from django.http import StreamingHttpResponse
-from rest_framework.decorators import api_view
-from zipstream_ng import ZipStream
-import requests
-
 @api_view(["GET"])
 def download_all_media(request):
     files = File.objects.filter(resource_type__in=["image", "video"])
@@ -250,21 +252,27 @@ def download_all_media(request):
     if not files.exists():
         return Response({"error": "No media found"}, status=404)
 
-    z = ZipStream()
+    # Create temp zip file on disk (NOT memory)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    zip_path = tmp.name
+    tmp.close()
 
-    for f in files:
-        def file_iter(url=f.file_url):
-            with requests.get(url, stream=True, timeout=30) as r:
-                r.raise_for_status()
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        yield chunk
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for f in files:
+                r = requests.get(f.file_url, stream=True, timeout=30)
+                if r.status_code == 200:
+                    zipf.writestr(f.name, r.content)
 
-        z.add(f.name, file_iter())
+        return FileResponse(
+            open(zip_path, "rb"),
+            as_attachment=True,
+            filename="all_media.zip",
+        )
 
-    response = StreamingHttpResponse(
-        z,
-        content_type="application/zip"
-    )
-    response["Content-Disposition"] = 'attachment; filename="all_media.zip"'
-    return response
+    finally:
+        # cleanup after response is sent
+        try:
+            os.unlink(zip_path)
+        except Exception:
+            pass
