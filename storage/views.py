@@ -210,3 +210,11 @@ def storage_stats(request):
         }
         for a in accounts
     ])
+
+
+from django.http import JsonResponse
+from rest_framework.decorators import api_view
+
+@api_view(["GET", "HEAD"])
+def health_check(request):
+    return JsonResponse({"status": "ok"})
