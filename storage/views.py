@@ -47,7 +47,12 @@ def upload_file(request):
         secure=True,
     )
 
-    result = cloudinary.uploader.upload(uploaded_file)
+    result = cloudinary.uploader.upload(
+    uploaded_file,
+    resource_type="auto",
+    chunk_size=6_000_000  # allows large videos
+)
+
 
     file = File.objects.create(
         name=name or uploaded_file.name,
