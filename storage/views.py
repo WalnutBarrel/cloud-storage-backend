@@ -30,10 +30,16 @@ def upload_file(request):
     if folder_id:
         folder = Folder.objects.get(id=folder_id)
 
-    # 🔥 PICK STORAGE ACCOUNT AUTOMATICALLY
-    account = pick_storage_account()
+    # ✅ NEW: pick account using file size
+    try:
+        account = pick_storage_account(uploaded_file.size)
+    except Exception:
+        return Response(
+            {"error": "All storage accounts are full"},
+            status=507
+        )
 
-    # 🔥 CONFIGURE CLOUDINARY FOR THIS UPLOAD
+    # configure correct Cloudinary account
     cloudinary.config(
         cloud_name=account.cloud_name,
         api_key=account.api_key,
@@ -41,10 +47,8 @@ def upload_file(request):
         secure=True,
     )
 
-    # 🔥 UPLOAD FILE
     result = cloudinary.uploader.upload(uploaded_file)
 
-    # 🔥 SAVE FILE WITH ACCOUNT INFO
     file = File.objects.create(
         name=name or uploaded_file.name,
         file_url=result["secure_url"],
@@ -54,7 +58,7 @@ def upload_file(request):
         storage_account=account,
     )
 
-    # 🔥 UPDATE STORAGE USAGE
+    # update usage
     account.used_bytes += result.get("bytes", 0)
     account.save()
 
@@ -62,10 +66,9 @@ def upload_file(request):
         "id": file.id,
         "name": file.name,
         "file": file.file_url,
-        "type": file.resource_type,
         "folder": file.folder.id if file.folder else None,
-        "uploaded_at": file.uploaded_at,
     })
+
 
 
 
@@ -95,12 +98,31 @@ def list_files(request):
 @api_view(["DELETE"])
 def delete_file(request, file_id):
     file = File.objects.get(id=file_id)
+    account = file.storage_account
+
+    # ✅ configure the SAME account used for upload
+    cloudinary.config(
+        cloud_name=account.cloud_name,
+        api_key=account.api_key,
+        api_secret=account.api_secret,
+        secure=True,
+    )
 
     public_id = file.file_url.split("/")[-1].split(".")[0]
-    cloudinary.uploader.destroy(public_id, resource_type=file.resource_type)
+    cloudinary.uploader.destroy(
+        public_id,
+        resource_type=file.resource_type
+    )
+
+    # ✅ free storage
+    account.used_bytes -= file.size
+    if account.used_bytes < 0:
+        account.used_bytes = 0
+    account.save()
 
     file.delete()
     return Response({"success": True})
+
 
 
 @api_view(["PUT"])
@@ -153,19 +175,37 @@ def download_zip(request):
 
     files = File.objects.filter(id__in=file_ids)
 
+    if not files.exists():
+        return Response({"error": "Files not found"}, status=404)
+
     zip_buffer = io.BytesIO()
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for f in files:
-            r = requests.get(f.file_url)
+            r = requests.get(f.file_url, timeout=15)
             if r.status_code == 200:
                 zip_file.writestr(f.name, r.content)
 
     zip_buffer.seek(0)
 
-    response = HttpResponse(
-        zip_buffer,
-        content_type="application/zip"
-    )
+    response = HttpResponse(zip_buffer, content_type="application/zip")
     response["Content-Disposition"] = 'attachment; filename="files.zip"'
     return response
+
+
+
+@api_view(["GET"])
+def storage_stats(request):
+    accounts = StorageAccount.objects.all().order_by("id")
+
+    return Response([
+        {
+            "id": a.id,
+            "name": a.name,
+            "used_gb": round(a.used_bytes / (1024**3), 2),
+            "limit_gb": round(a.limit_bytes / (1024**3), 2),
+            "free_gb": round((a.limit_bytes - a.used_bytes) / (1024**3), 2),
+            "percent_used": round((a.used_bytes / a.limit_bytes) * 100, 2),
+        }
+        for a in accounts
+    ])
