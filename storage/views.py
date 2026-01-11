@@ -276,3 +276,20 @@ def download_all_media(request):
             os.unlink(zip_path)
         except Exception:
             pass
+
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import File
+
+@api_view(["GET"])
+def list_image_urls(request):
+    files = File.objects.filter(resource_type="image")
+
+    return Response([
+        {
+            "name": f.name,
+            "url": f.file_url,
+        }
+        for f in files
+    ])
