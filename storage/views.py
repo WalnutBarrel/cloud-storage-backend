@@ -2,11 +2,14 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 import cloudinary.uploader
-from .models import File, Folder
+from .models import File, Folder, StorageAccount
 import zipfile
 import io
 import requests
 from django.http import HttpResponse
+from .utils import pick_storage_account
+import cloudinary
+
 
 
 
@@ -27,15 +30,33 @@ def upload_file(request):
     if folder_id:
         folder = Folder.objects.get(id=folder_id)
 
+    # 🔥 PICK STORAGE ACCOUNT AUTOMATICALLY
+    account = pick_storage_account()
+
+    # 🔥 CONFIGURE CLOUDINARY FOR THIS UPLOAD
+    cloudinary.config(
+        cloud_name=account.cloud_name,
+        api_key=account.api_key,
+        api_secret=account.api_secret,
+        secure=True,
+    )
+
+    # 🔥 UPLOAD FILE
     result = cloudinary.uploader.upload(uploaded_file)
 
+    # 🔥 SAVE FILE WITH ACCOUNT INFO
     file = File.objects.create(
         name=name or uploaded_file.name,
         file_url=result["secure_url"],
         resource_type=result["resource_type"],
         folder=folder,
         size=result.get("bytes", 0),
+        storage_account=account,
     )
+
+    # 🔥 UPDATE STORAGE USAGE
+    account.used_bytes += result.get("bytes", 0)
+    account.save()
 
     return Response({
         "id": file.id,
@@ -45,6 +66,7 @@ def upload_file(request):
         "folder": file.folder.id if file.folder else None,
         "uploaded_at": file.uploaded_at,
     })
+
 
 
 @api_view(["GET"])
