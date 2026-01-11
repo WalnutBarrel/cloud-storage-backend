@@ -86,13 +86,20 @@ def list_files(request):
         "id": f.id,
         "name": f.name,
         "file": f.file_url,
-        "type": f.resource_type,   # 🔥 IMPORTANT
+        "type": f.resource_type,
         "folder": f.folder.id if f.folder else None,
         "uploaded_at": f.uploaded_at,
         "size": f.size,
+
+        # 🔥 NEW
+        "storage_account": {
+            "id": f.storage_account.id,
+            "name": f.storage_account.name,
+        }
     }
     for f in files.order_by("-uploaded_at")
 ])
+
 
 
 
