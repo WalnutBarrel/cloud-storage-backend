@@ -238,23 +238,33 @@ def clear_all_files(request):
     return Response({"success": True})
 
 
+from django.http import StreamingHttpResponse
+from rest_framework.decorators import api_view
+from zipstream import ZipStream
+import requests
+
 @api_view(["GET"])
-def download_all_images(request):
-    files = File.objects.filter(resource_type="image")
+def download_all_media(request):
+    files = File.objects.filter(resource_type__in=["image", "video"])
 
     if not files.exists():
-        return Response({"error": "No images found"}, status=404)
+        return Response({"error": "No media found"}, status=404)
 
-    zip_buffer = io.BytesIO()
+    z = ZipStream()
 
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for f in files:
-            r = requests.get(f.file_url, timeout=15)
-            if r.status_code == 200:
-                zip_file.writestr(f.name, r.content)
+    for f in files:
+        def file_iter(url=f.file_url):
+            with requests.get(url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        yield chunk
 
-    zip_buffer.seek(0)
+        z.add(f.name, file_iter())
 
-    response = HttpResponse(zip_buffer, content_type="application/zip")
-    response["Content-Disposition"] = 'attachment; filename="all_images.zip"'
+    response = StreamingHttpResponse(
+        z,
+        content_type="application/zip"
+    )
+    response["Content-Disposition"] = 'attachment; filename="all_media.zip"'
     return response
