@@ -82,17 +82,18 @@ def list_files(request):
         files = File.objects.filter(folder__isnull=True)
 
     return Response([
-        {
-            "id": f.id,
-            "name": f.name,
-            "file": f.file_url,
-            "type": f.resource_type,
-            "folder": f.folder.id if f.folder else None,
-            "uploaded_at": f.uploaded_at,
-            "size": f.size,
-        }
-        for f in files.order_by("-uploaded_at")
-    ])
+    {
+        "id": f.id,
+        "name": f.name,
+        "file": f.file_url,
+        "type": f.resource_type,   # 🔥 IMPORTANT
+        "folder": f.folder.id if f.folder else None,
+        "uploaded_at": f.uploaded_at,
+        "size": f.size,
+    }
+    for f in files.order_by("-uploaded_at")
+])
+
 
 
 @api_view(["DELETE"])
