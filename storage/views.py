@@ -218,3 +218,9 @@ from rest_framework.decorators import api_view
 @api_view(["GET", "HEAD"])
 def health_check(request):
     return JsonResponse({"status": "ok"})
+
+
+@api_view(["DELETE"])
+def clear_all_files(request):
+    File.objects.all().delete()
+    return Response({"success": True})
