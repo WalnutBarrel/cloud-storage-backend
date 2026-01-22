@@ -57,8 +57,10 @@ def upload_file(request):
     result = cloudinary.uploader.upload(
     uploaded_file,
     resource_type="auto",
-    chunk_size=6_000_000  # allows large videos
+    eager_async=True,
+    chunk_size=6000000  # 🔥 enables faster streaming
 )
+
 
 
     file = File.objects.create(
