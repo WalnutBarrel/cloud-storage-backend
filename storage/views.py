@@ -320,7 +320,6 @@ def download_file(request, file_id):
 
 
 
-
 import cloudinary
 import cloudinary.utils
 from rest_framework.decorators import api_view
@@ -330,27 +329,24 @@ from .models import File
 
 @api_view(["POST"])
 def create_cloudinary_zip(request):
-    """
-    Create one ZIP per Cloudinary account (fast, CDN-based)
-    """
-
     files = File.objects.filter(resource_type="image")
 
     if not files.exists():
         return Response({"error": "No images found"}, status=400)
 
-    zips = []
+    zips = {}
 
-    # group files by storage account
-    accounts = {}
     for f in files:
         acc = f.storage_account
-        accounts.setdefault(acc.id, []).append(f)
+        zips.setdefault(acc.id, {"account": acc, "files": []})
+        zips[acc.id]["files"].append(f)
 
-    for acc_id, acc_files in accounts.items():
-        acc = acc_files[0].storage_account
+    result = []
 
-        # configure Cloudinary for THIS account
+    for data in zips.values():
+        acc = data["account"]
+        files = data["files"]
+
         cloudinary.config(
             cloud_name=acc.cloud_name,
             api_key=acc.api_key,
@@ -359,9 +355,11 @@ def create_cloudinary_zip(request):
         )
 
         public_ids = []
-        for f in acc_files:
-            public_id = f.file_url.split("/upload/")[-1].rsplit(".", 1)[0]
-            public_ids.append(public_id)
+        for f in files:
+            path = f.file_url.split("/upload/")[-1]
+            if path.startswith("v"):
+                path = path.split("/", 1)[1]
+            public_ids.append(path.rsplit(".", 1)[0])
 
         zip_url = cloudinary.utils.download_archive_url(
             public_ids=public_ids,
@@ -369,7 +367,7 @@ def create_cloudinary_zip(request):
             type="upload"
         )
 
-        zips.append({
+        result.append({
             "account": acc.name,
             "count": len(public_ids),
             "download_url": zip_url,
@@ -377,5 +375,5 @@ def create_cloudinary_zip(request):
 
     return Response({
         "message": "ZIPs ready",
-        "zips": zips
+        "zips": result
     })
