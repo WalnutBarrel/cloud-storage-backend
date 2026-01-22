@@ -84,6 +84,22 @@ def upload_file(request):
     })
 
 
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Folder, File
+
+@api_view(["DELETE"])
+def delete_folder(request, folder_id):
+    try:
+        folder = Folder.objects.get(id=folder_id)
+
+        # delete files inside folder first
+        File.objects.filter(folder=folder).delete()
+
+        folder.delete()
+        return Response({"message": "Folder deleted"})
+    except Folder.DoesNotExist:
+        return Response({"error": "Folder not found"}, status=404)
 
 
 @api_view(["GET"])

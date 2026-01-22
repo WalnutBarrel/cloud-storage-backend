@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import upload_file, list_files, delete_file, rename_file, list_folders, create_folder
 from .views import download_zip, storage_stats, health_check, clear_all_files, download_all_media, list_image_urls
-from .views import download_file, create_cloudinary_zip
+from .views import download_file, create_cloudinary_zip, delete_folder
 
 urlpatterns = [
     path("upload/", upload_file),
@@ -11,6 +11,7 @@ urlpatterns = [
     #folders
     path("folders/", list_folders),
     path("folders/create/", create_folder),
+    path("folders/<int:folder_id>/delete/", delete_folder),
     path("files/download-zip/", download_zip),
     path("storage/stats/", storage_stats),
     path("health/", health_check),
