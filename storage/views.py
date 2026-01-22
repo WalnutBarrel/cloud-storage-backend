@@ -344,25 +344,29 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import File
 
-
 @api_view(["POST"])
 def create_cloudinary_zip(request):
-    files = File.objects.filter(resource_type="image")
+    files = File.objects.all()
 
     if not files.exists():
-        return Response({"error": "No images found"}, status=400)
+        return Response({"error": "No files found"}, status=400)
 
     grouped = {}
 
     for f in files:
-        acc = f.storage_account
-        grouped.setdefault(acc.id, {"account": acc, "files": []})
-        grouped[acc.id]["files"].append(f)
+        key = (f.storage_account.id, f.resource_type)
+        grouped.setdefault(key, {
+            "account": f.storage_account,
+            "resource_type": f.resource_type,
+            "files": []
+        })
+        grouped[key]["files"].append(f)
 
     result = []
 
     for group in grouped.values():
         acc = group["account"]
+        resource_type = group["resource_type"]
         files = group["files"]
 
         cloudinary.config(
@@ -375,17 +379,18 @@ def create_cloudinary_zip(request):
         public_ids = []
         for f in files:
             path = f.file_url.split("/upload/")[-1]
-            path = re.sub(r"^v\d+/", "", path)   # ✅ correct
+            path = re.sub(r"^v\d+/", "", path)  # ✅ keep this
             public_ids.append(path.rsplit(".", 1)[0])
 
         zip_url = cloudinary.utils.download_archive_url(
             public_ids=public_ids,
-            resource_type="image",
+            resource_type=resource_type,  # 🔥 image OR video
             type="upload"
         )
 
         result.append({
             "account": acc.name,
+            "type": resource_type,
             "count": len(public_ids),
             "download_url": zip_url,
         })
