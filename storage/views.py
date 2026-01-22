@@ -1,23 +1,26 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
+from django.http import (
+    HttpResponse,
+    FileResponse,
+    StreamingHttpResponse,
+    JsonResponse,
+)
+
+import cloudinary
 import cloudinary.uploader
-from .models import File, Folder, StorageAccount
+import cloudinary.utils
+
 import zipfile
 import io
-import requests
-from django.http import HttpResponse
-from .models import pick_storage_account
-import cloudinary
-import zipfile
 import tempfile
 import os
+import re
 import requests
-from django.http import FileResponse
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
 
-
+from .models import File, Folder, StorageAccount
+from .utils import pick_storage_account
 
 
 # =====================
@@ -37,16 +40,11 @@ def upload_file(request):
     if folder_id:
         folder = Folder.objects.get(id=folder_id)
 
-    # ✅ NEW: pick account using file size
     try:
         account = pick_storage_account(uploaded_file.size)
     except Exception:
-        return Response(
-            {"error": "All storage accounts are full"},
-            status=507
-        )
+        return Response({"error": "All storage accounts are full"}, status=507)
 
-    # configure correct Cloudinary account
     cloudinary.config(
         cloud_name=account.cloud_name,
         api_key=account.api_key,
@@ -55,13 +53,11 @@ def upload_file(request):
     )
 
     result = cloudinary.uploader.upload(
-    uploaded_file,
-    resource_type="auto",
-    eager_async=True,
-    chunk_size=6000000  # 🔥 enables faster streaming
-)
-
-
+        uploaded_file,
+        resource_type="auto",
+        eager_async=True,
+        chunk_size=6000000,
+    )
 
     file = File.objects.create(
         name=name or uploaded_file.name,
@@ -72,7 +68,6 @@ def upload_file(request):
         storage_account=account,
     )
 
-    # update usage
     account.used_bytes += result.get("bytes", 0)
     account.save()
 
@@ -82,24 +77,6 @@ def upload_file(request):
         "file": file.file_url,
         "folder": file.folder.id if file.folder else None,
     })
-
-
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import Folder, File
-
-@api_view(["DELETE"])
-def delete_folder(request, folder_id):
-    try:
-        folder = Folder.objects.get(id=folder_id)
-
-        # delete files inside folder first
-        File.objects.filter(folder=folder).delete()
-
-        folder.delete()
-        return Response({"message": "Folder deleted"})
-    except Folder.DoesNotExist:
-        return Response({"error": "Folder not found"}, status=404)
 
 
 @api_view(["GET"])
@@ -112,25 +89,21 @@ def list_files(request):
         files = File.objects.filter(folder__isnull=True)
 
     return Response([
-    {
-        "id": f.id,
-        "name": f.name,
-        "file": f.file_url,
-        "type": f.resource_type,
-        "folder": f.folder.id if f.folder else None,
-        "uploaded_at": f.uploaded_at,
-        "size": f.size,
-
-        # 🔥 NEW
-        "storage_account": {
-            "id": f.storage_account.id,
-            "name": f.storage_account.name,
+        {
+            "id": f.id,
+            "name": f.name,
+            "file": f.file_url,
+            "type": f.resource_type,
+            "folder": f.folder.id if f.folder else None,
+            "uploaded_at": f.uploaded_at,
+            "size": f.size,
+            "storage_account": {
+                "id": f.storage_account.id,
+                "name": f.storage_account.name,
+            }
         }
-    }
-    for f in files.order_by("-uploaded_at")
-])
-
-
+        for f in files.order_by("-uploaded_at")
+    ])
 
 
 @api_view(["DELETE"])
@@ -138,7 +111,6 @@ def delete_file(request, file_id):
     file = File.objects.get(id=file_id)
     account = file.storage_account
 
-    # ✅ configure the SAME account used for upload
     cloudinary.config(
         cloud_name=account.cloud_name,
         api_key=account.api_key,
@@ -146,21 +118,18 @@ def delete_file(request, file_id):
         secure=True,
     )
 
-    public_id = file.file_url.split("/")[-1].split(".")[0]
+    public_id = file.file_url.split("/")[-1].rsplit(".", 1)[0]
+
     cloudinary.uploader.destroy(
         public_id,
-        resource_type=file.resource_type
+        resource_type=file.resource_type,
     )
 
-    # ✅ free storage
-    account.used_bytes -= file.size
-    if account.used_bytes < 0:
-        account.used_bytes = 0
+    account.used_bytes = max(account.used_bytes - file.size, 0)
     account.save()
 
     file.delete()
     return Response({"success": True})
-
 
 
 @api_view(["PUT"])
@@ -170,6 +139,23 @@ def rename_file(request, file_id):
     file.save()
     return Response({"success": True})
 
+
+@api_view(["GET"])
+def download_file(request, file_id):
+    file = File.objects.get(id=file_id)
+
+    r = requests.get(file.file_url, stream=True, timeout=15)
+
+    response = StreamingHttpResponse(
+        r.iter_content(chunk_size=8192),
+        content_type="application/octet-stream",
+    )
+
+    response["Content-Disposition"] = (
+        f'attachment; filename="{file.name}"'
+    )
+
+    return response
 
 
 # =====================
@@ -193,74 +179,52 @@ def create_folder(request):
 
 @api_view(["GET"])
 def list_folders(request):
-    folders = Folder.objects.all().order_by("name")
     return Response([
         {
             "id": f.id,
             "name": f.name,
             "created_at": f.created_at,
         }
-        for f in folders
+        for f in Folder.objects.all().order_by("name")
     ])
 
+
+@api_view(["DELETE"])
+def delete_folder(request, folder_id):
+    try:
+        folder = Folder.objects.get(id=folder_id)
+        File.objects.filter(folder=folder).delete()
+        folder.delete()
+        return Response({"message": "Folder deleted"})
+    except Folder.DoesNotExist:
+        return Response({"error": "Folder not found"}, status=404)
+
+
+# =====================
+# ZIP / DOWNLOAD APIs
+# =====================
 
 @api_view(["POST"])
 def download_zip(request):
     file_ids = request.data.get("files", [])
 
-    if not file_ids:
-        return Response({"error": "No files selected"}, status=400)
-
     files = File.objects.filter(id__in=file_ids)
-
     if not files.exists():
         return Response({"error": "Files not found"}, status=404)
 
     zip_buffer = io.BytesIO()
 
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         for f in files:
-            r = requests.get(f.file_url, timeout=15)
+            r = requests.get(f.file_url, timeout=20)
             if r.status_code == 200:
-                zip_file.writestr(f.name, r.content)
+                zipf.writestr(f.name, r.content)
 
     zip_buffer.seek(0)
 
     response = HttpResponse(zip_buffer, content_type="application/zip")
     response["Content-Disposition"] = 'attachment; filename="files.zip"'
     return response
-
-
-
-@api_view(["GET"])
-def storage_stats(request):
-    accounts = StorageAccount.objects.all().order_by("id")
-
-    return Response([
-        {
-            "id": a.id,
-            "name": a.name,
-            "used_gb": round(a.used_bytes / (1024**3), 2),
-            "limit_gb": round(a.limit_bytes / (1024**3), 2),
-            "free_gb": round((a.limit_bytes - a.used_bytes) / (1024**3), 2),
-            "percent_used": round((a.used_bytes / a.limit_bytes) * 100, 2),
-        }
-        for a in accounts
-    ])
-
-
-from django.http import JsonResponse
-from rest_framework.decorators import api_view
-
-@api_view(["GET", "HEAD"])
-def health_check(request):
-    return JsonResponse({"status": "ok"})
-
-
-@api_view(["DELETE"])
-def clear_all_files(request):
-    File.objects.all().delete()
-    return Response({"success": True})
 
 
 @api_view(["GET"])
@@ -270,7 +234,6 @@ def download_all_media(request):
     if not files.exists():
         return Response({"error": "No media found"}, status=404)
 
-    # Create temp zip file on disk (NOT memory)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     zip_path = tmp.name
     tmp.close()
@@ -287,62 +250,24 @@ def download_all_media(request):
             as_attachment=True,
             filename="all_media.zip",
         )
-
     finally:
-        # cleanup after response is sent
         try:
             os.unlink(zip_path)
         except Exception:
             pass
 
 
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import File
-
 @api_view(["GET"])
 def list_image_urls(request):
-    files = File.objects.filter(resource_type="image")
-
     return Response([
-        {
-            "name": f.name,
-            "url": f.file_url,
-        }
-        for f in files
+        {"name": f.name, "url": f.file_url}
+        for f in File.objects.filter(resource_type="image")
     ])
 
 
-from django.http import StreamingHttpResponse
-import requests
-import os
-
-@api_view(["GET"])
-def download_file(request, file_id):
-    file = File.objects.get(id=file_id)
-
-    r = requests.get(file.file_url, stream=True, timeout=15)
-
-    response = StreamingHttpResponse(
-        r.iter_content(chunk_size=8192),
-        content_type="application/octet-stream"
-    )
-
-    filename = file.name or os.path.basename(file.file_url)
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-
-    return response
-
-
-
-
-
-import cloudinary
-import cloudinary.utils
-import re
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import File
+# =====================
+# CLOUDINARY FAST ZIP
+# =====================
 
 @api_view(["POST"])
 def create_cloudinary_zip(request):
@@ -358,7 +283,7 @@ def create_cloudinary_zip(request):
         grouped.setdefault(key, {
             "account": f.storage_account,
             "resource_type": f.resource_type,
-            "files": []
+            "files": [],
         })
         grouped[key]["files"].append(f)
 
@@ -367,7 +292,6 @@ def create_cloudinary_zip(request):
     for group in grouped.values():
         acc = group["account"]
         resource_type = group["resource_type"]
-        files = group["files"]
 
         cloudinary.config(
             cloud_name=acc.cloud_name,
@@ -377,15 +301,15 @@ def create_cloudinary_zip(request):
         )
 
         public_ids = []
-        for f in files:
+        for f in group["files"]:
             path = f.file_url.split("/upload/")[-1]
-            path = re.sub(r"^v\d+/", "", path)  # ✅ keep this
+            path = re.sub(r"^v\d+/", "", path)
             public_ids.append(path.rsplit(".", 1)[0])
 
         zip_url = cloudinary.utils.download_archive_url(
             public_ids=public_ids,
-            resource_type=resource_type,  # 🔥 image OR video
-            type="upload"
+            resource_type=resource_type,
+            type="upload",
         )
 
         result.append({
@@ -395,7 +319,34 @@ def create_cloudinary_zip(request):
             "download_url": zip_url,
         })
 
-    return Response({
-        "message": "ZIPs ready",
-        "zips": result
-    })
+    return Response({"message": "ZIPs ready", "zips": result})
+
+
+# =====================
+# MISC
+# =====================
+
+@api_view(["GET", "HEAD"])
+def health_check(request):
+    return JsonResponse({"status": "ok"})
+
+
+@api_view(["DELETE"])
+def clear_all_files(request):
+    File.objects.all().delete()
+    return Response({"success": True})
+
+
+@api_view(["GET"])
+def storage_stats(request):
+    return Response([
+        {
+            "id": a.id,
+            "name": a.name,
+            "used_gb": round(a.used_bytes / (1024 ** 3), 2),
+            "limit_gb": round(a.limit_bytes / (1024 ** 3), 2),
+            "free_gb": round((a.limit_bytes - a.used_bytes) / (1024 ** 3), 2),
+            "percent_used": round((a.used_bytes / a.limit_bytes) * 100, 2),
+        }
+        for a in StorageAccount.objects.all().order_by("id")
+    ])
