@@ -314,3 +314,46 @@ def download_file(request, file_id):
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
 
     return response
+
+
+
+
+
+
+
+import cloudinary.api
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import File
+
+
+@api_view(["POST"])
+def create_cloudinary_zip(request):
+    """
+    Create a ZIP of all images using Cloudinary's archive API
+    (Cloudinary handles async internally)
+    """
+
+    files = File.objects.filter(resource_type="image")
+
+    if not files.exists():
+        return Response({"error": "No images found"}, status=400)
+
+    public_ids = []
+    for f in files:
+        # Extract public_id from Cloudinary URL
+        # https://res.cloudinary.com/<cloud>/image/upload/v123/path/name.jpg
+        public_id = f.file_url.split("/upload/")[-1].rsplit(".", 1)[0]
+        public_ids.append(public_id)
+
+    # ✅ Cloudinary creates ZIP internally (fast)
+    result = cloudinary.api.create_archive(
+        public_ids=public_ids,
+        resource_type="image",
+        type="upload"
+    )
+
+    return Response({
+        "message": "ZIP ready",
+        "download_url": result["secure_url"],
+    })
