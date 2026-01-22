@@ -321,6 +321,7 @@ def download_file(request, file_id):
 
 
 
+import cloudinary
 import cloudinary.utils
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -330,8 +331,7 @@ from .models import File
 @api_view(["POST"])
 def create_cloudinary_zip(request):
     """
-    Generate a Cloudinary ZIP download URL for all images
-    (ZIP is created on Cloudinary infrastructure)
+    Create one ZIP per Cloudinary account (fast, CDN-based)
     """
 
     files = File.objects.filter(resource_type="image")
@@ -339,21 +339,43 @@ def create_cloudinary_zip(request):
     if not files.exists():
         return Response({"error": "No images found"}, status=400)
 
-    public_ids = []
-    for f in files:
-        # Extract public_id from URL
-        # https://res.cloudinary.com/<cloud>/image/upload/v123/path/name.jpg
-        public_id = f.file_url.split("/upload/")[-1].rsplit(".", 1)[0]
-        public_ids.append(public_id)
+    zips = []
 
-    # ✅ Cloudinary generates ZIP internally
-    zip_url = cloudinary.utils.download_archive_url(
-        public_ids=public_ids,
-        resource_type="image",
-        type="upload"
-    )
+    # group files by storage account
+    accounts = {}
+    for f in files:
+        acc = f.storage_account
+        accounts.setdefault(acc.id, []).append(f)
+
+    for acc_id, acc_files in accounts.items():
+        acc = acc_files[0].storage_account
+
+        # configure Cloudinary for THIS account
+        cloudinary.config(
+            cloud_name=acc.cloud_name,
+            api_key=acc.api_key,
+            api_secret=acc.api_secret,
+            secure=True,
+        )
+
+        public_ids = []
+        for f in acc_files:
+            public_id = f.file_url.split("/upload/")[-1].rsplit(".", 1)[0]
+            public_ids.append(public_id)
+
+        zip_url = cloudinary.utils.download_archive_url(
+            public_ids=public_ids,
+            resource_type="image",
+            type="upload"
+        )
+
+        zips.append({
+            "account": acc.name,
+            "count": len(public_ids),
+            "download_url": zip_url,
+        })
 
     return Response({
-        "message": "ZIP ready",
-        "download_url": zip_url,
+        "message": "ZIPs ready",
+        "zips": zips
     })
