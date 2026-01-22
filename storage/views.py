@@ -319,9 +319,9 @@ def download_file(request, file_id):
 
 
 
-
 import cloudinary
 import cloudinary.utils
+import re
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import File
@@ -334,18 +334,18 @@ def create_cloudinary_zip(request):
     if not files.exists():
         return Response({"error": "No images found"}, status=400)
 
-    zips = {}
+    grouped = {}
 
     for f in files:
         acc = f.storage_account
-        zips.setdefault(acc.id, {"account": acc, "files": []})
-        zips[acc.id]["files"].append(f)
+        grouped.setdefault(acc.id, {"account": acc, "files": []})
+        grouped[acc.id]["files"].append(f)
 
     result = []
 
-    for data in zips.values():
-        acc = data["account"]
-        files = data["files"]
+    for group in grouped.values():
+        acc = group["account"]
+        files = group["files"]
 
         cloudinary.config(
             cloud_name=acc.cloud_name,
@@ -357,8 +357,7 @@ def create_cloudinary_zip(request):
         public_ids = []
         for f in files:
             path = f.file_url.split("/upload/")[-1]
-            if path.startswith("v"):
-                path = path.split("/", 1)[1]
+            path = re.sub(r"^v\d+/", "", path)   # ✅ correct
             public_ids.append(path.rsplit(".", 1)[0])
 
         zip_url = cloudinary.utils.download_archive_url(
